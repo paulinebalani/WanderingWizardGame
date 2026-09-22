@@ -6,6 +6,9 @@ from settings import Settings
 
 class Transition:
     def __init__ (self, game):
+        self.game = game            # needed so the transition can present
+                                     # each frame through the same real-screen
+                                     # scaling as the rest of the game
         self.screen = game.screen
         self.settings = game.settings
         self.clock = pygame.time.Clock()    #to control the frame rate
@@ -49,7 +52,7 @@ class Transition:
             pixelated = pygame.transform.scale(small, (w, h))
 
             self.screen.blit(pixelated, (0,0))      # draw the image in the screen
-            pygame.display.flip()                   # display/make the image visible
+            self.game.present_frame()               # scale + display it on the real screen
             self.clock.tick(60)                     # limit the loop to 60 frames per second
 
 class Vignette (Transition):

@@ -34,9 +34,31 @@ class WanderingWizard:
 
         self.settings = Settings()
 
-        self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
-        self.settings.screen_width  = self.screen.get_rect().width
-        self.settings.screen_height = self.screen.get_rect().height
+        # ── Responsive display setup ────────────────────────────────────
+        # The real, physical window: (0, 0) + FULLSCREEN tells pygame to
+        # use whatever resolution the current desktop/laptop screen is
+        # actually running at, so this adapts automatically to any monitor.
+        self.real_screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+        real_w, real_h = self.real_screen.get_size()
+
+        # Every button, sprite position, HUD element, etc. in this project
+        # was authored against a fixed 1920x1080 layout (see settings.py).
+        # Instead of changing all of those hand-placed coordinates, we draw
+        # everything onto a fixed-size virtual canvas at that same design
+        # resolution, then scale the whole finished frame (uniformly, so
+        # nothing stretches or distorts) to fit the real screen, centered
+        # with letterbox bars if the aspect ratio differs. This guarantees
+        # nothing is ever cut off, overlapping, or pushed off-screen on a
+        # smaller/larger/differently-shaped display.
+        design_w = self.settings.screen_width
+        design_h = self.settings.screen_height
+        self.screen = pygame.Surface((design_w, design_h)).convert()
+
+        self._render_scale = min(real_w / design_w, real_h / design_h)
+        self._render_w = max(1, int(design_w * self._render_scale))
+        self._render_h = max(1, int(design_h * self._render_scale))
+        self._render_x = (real_w - self._render_w) // 2
+        self._render_y = (real_h - self._render_h) // 2
 
         self.clock = pygame.time.Clock()
         pygame.display.set_caption('Wandering Wizard')
@@ -96,6 +118,30 @@ class WanderingWizard:
         self.settings_menu = SettingsMenu(self.screen, self.sounds)
 
     # ════════════════════════════════════════════════════════════════════════
+    # Responsive-display helpers
+    # ════════════════════════════════════════════════════════════════════════
+    def _to_virtual_pos(self, pos):
+        """Convert a real-screen mouse position into virtual-canvas
+        coordinates, since all buttons/UI hit-testing is defined in the
+        fixed design resolution drawn onto self.screen."""
+        x, y = pos
+        vx = (x - self._render_x) / self._render_scale
+        vy = (y - self._render_y) / self._render_scale
+        vx = max(0, min(vx, self.settings.screen_width - 1))
+        vy = max(0, min(vy, self.settings.screen_height - 1))
+        return (int(vx), int(vy))
+
+    def present_frame(self):
+        """Scale the finished virtual-canvas frame onto the real screen
+        and flip it. Call this instead of pygame.display.flip() anywhere
+        a frame is meant to become visible."""
+        scaled = pygame.transform.smoothscale(
+            self.screen, (self._render_w, self._render_h))
+        self.real_screen.fill((0, 0, 0))
+        self.real_screen.blit(scaled, (self._render_x, self._render_y))
+        pygame.display.flip()
+
+    # ════════════════════════════════════════════════════════════════════════
     # Scene switching helper
     # ════════════════════════════════════════════════════════════════════════
     def _switch_scene(self, new_scene):
@@ -125,13 +171,23 @@ class WanderingWizard:
     # Event handling
     # ════════════════════════════════════════════════════════════════════════
     def check_events(self):
-        mouse_pos  = pygame.mouse.get_pos()
+        mouse_pos  = self._to_virtual_pos(pygame.mouse.get_pos())
         mouse_down = pygame.mouse.get_pressed()[0]
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.scoreboard.reset_high_score() 
                 sys.exit()
+
+            # Translate any mouse coordinates on the event itself (clicks,
+            # motion, etc.) from real-screen space into virtual-canvas
+            # space, so button hit-testing (which uses event.pos) lines up
+            # with what's actually drawn regardless of screen resolution.
+            if hasattr(event, 'pos'):
+                event = pygame.event.Event(
+                    event.type,
+                    {**event.dict, 'pos': self._to_virtual_pos(event.pos)}
+                )
 
             # ── ESC: always go back to main menu (or quit from menu) ────
             if event.type == pygame.KEYDOWN:
@@ -189,7 +245,7 @@ class WanderingWizard:
                 #self._handle_game_event(event)
                 if self.game_over_active:
                     result = self.game_over_screen.handle_event(
-                        event, pygame.mouse.get_pos()
+                        event, mouse_pos
                     )
                     if result == 'yes':
                         self.game_over_active = False
@@ -339,7 +395,7 @@ class WanderingWizard:
         elif self.scene == SCENE_GAME:
             self._draw_game()
 
-        pygame.display.flip()
+        self.present_frame()
 
     def _draw_game(self):
         """All game-play rendering."""
@@ -484,7 +540,7 @@ class WanderingWizard:
             self.screen.blit(overlay, (0, 0))
 
             self.game_over_screen.update(
-                pygame.mouse.get_pos(),
+                self._to_virtual_pos(pygame.mouse.get_pos()),
                 pygame.mouse.get_pressed()[0]
             )
             self.game_over_screen.draw(self.scoreboard.high_score)

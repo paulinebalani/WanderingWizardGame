@@ -21,4 +21,3 @@ class Settings:
             self.screen_background2, (img_rect.width, self.screen_height))  # only fit height
 
         self.bg2_x = 0
-        
